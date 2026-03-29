@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Country Sim Realism</title>
+<title>Sovereign</title>
 <style>
 :root {
   --bg:#0d1117;--surface:#161b22;--surface2:#1c2230;--border:#30363d;--border2:#3d444d;
@@ -178,7 +178,7 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
 #landingOverlay{position:fixed;inset:0;background:var(--bg);z-index:1100;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:24px 0 env(safe-area-inset-bottom,16px)}
 #landingOverlay.hidden{display:none}
 .landing-box{background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:40px 44px;width:480px;max-width:96vw;text-align:center;margin:auto 0}
-.landing-box h1{font-size:24px;font-weight:700;color:var(--accent);margin-bottom:4px}
+.landing-box h1{font-size:30px;font-weight:800;color:var(--accent);margin-bottom:4px;letter-spacing:-0.5px}
 .landing-box .landing-sub{color:var(--text-dim);font-size:13px;margin-bottom:30px}
 .landing-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
 .landing-card{background:var(--surface2);border:2px solid var(--border2);border-radius:10px;padding:20px 14px;cursor:pointer;transition:border-color .15s,box-shadow .15s;text-align:center}
@@ -409,8 +409,8 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
 <!-- ═══════════════════ LANDING OVERLAY ═══════════════════ -->
 <div id="landingOverlay" class="hidden">
   <div class="landing-box">
-    <h1>🌍 Country Sim Realism</h1>
-    <p class="landing-sub">Choose how you want to play</p>
+    <h1>👑 Sovereign</h1>
+    <p class="landing-sub">A geopolitical strategy game — choose how you want to play</p>
 
     <!-- Main choice cards -->
     <div id="landingCards">
@@ -526,7 +526,7 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
 <!-- ═══════════════════ LOGIN OVERLAY ═══════════════════ -->
 <div id="loginOverlay">
   <div class="login-box">
-    <h1>🌍 Country Sim Realism</h1>
+    <h1>👑 Sovereign</h1>
     <!-- Room badge shown when joining via room code -->
     <div class="login-room-badge hidden" id="loginRoomBadge">
       Room: <span class="lrb-code" id="loginRoomCodeLabel">——</span>
@@ -557,7 +557,7 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
 <div id="pickerOverlay" class="hidden">
   <div class="picker-header">
     <div>
-      <h2>🌍 Choose Your Country</h2>
+      <h2>👑 Choose Your Country</h2>
       <div class="picker-sub" id="pickerWelcome">Welcome — pick a country to play</div>
     </div>
     <input class="picker-search" id="pickerSearch" placeholder="🔍 Search country…" oninput="filterPickerCards(this.value)">
@@ -584,7 +584,7 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
 
 <!-- ═══════════════════ HEADER ═══════════════════ -->
 <header id="header" class="hidden">
-  <span class="brand">🌍 Country Sim Realism</span>
+  <span class="brand">👑 Sovereign</span>
   <span class="turn-info">Turn <span id="turnDisplay">0</span> — <span id="dateDisplay">January 2025</span></span>
   <span id="timerBadge" class="timer-badge" style="display:none"></span>
   <button id="mobileMenuBtn" style="display:none;background:none;border:1px solid var(--border2);color:var(--text);padding:5px 10px;border-radius:var(--radius);cursor:pointer;font-size:16px;flex-shrink:0" onclick="toggleMobileMenu()">☰</button>
