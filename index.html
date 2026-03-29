@@ -2560,6 +2560,8 @@ function claimCountry(){
 //  LOGIN
 // ══════════════════════════════════════════════════════════════
 document.getElementById('loginName').addEventListener('input', e => {
+  // Show password field when typing GM
+  document.getElementById('pwField').classList.toggle('hidden', e.target.value.trim().toLowerCase() !== 'gm');
   const v = e.target.value.trim().toLowerCase();
   // Show GM password field only in main game (not in AI GM rooms)
   document.getElementById('pwField').classList.toggle('hidden', v !== 'gm' || !!_roomCode);
@@ -2581,17 +2583,14 @@ function tryLogin(){
     return;
   }
 
-  // GM login only available in main game (not in AI GM rooms)
-  if(name.toLowerCase() === 'gm' && !_roomCode){
+  // GM login — works in both main game and rooms, always requires password
+  if(name.toLowerCase() === 'gm'){
+    document.getElementById('pwField').classList.remove('hidden');
+    if(!pw){ document.getElementById('loginError').textContent = 'Enter the GM password.'; return; }
     if(pw !== GM_PASSWORD){ document.getElementById('loginError').textContent = 'Wrong GM password.'; return; }
-    setSession({ name: 'GM', country: 'gm', roomCode: null });
+    setSession({ name: 'GM', country: 'gm', roomCode: _roomCode || null });
     document.getElementById('loginOverlay').classList.add('hidden');
     bootApp();
-    return;
-  }
-  // Block "gm" as a player name in rooms (reserved keyword)
-  if(name.toLowerCase() === 'gm' && _roomCode){
-    document.getElementById('loginError').textContent = '"GM" is reserved. Choose a different name.';
     return;
   }
 
