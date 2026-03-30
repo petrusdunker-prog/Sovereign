@@ -1205,7 +1205,7 @@ function makeCountryState(id){
     tech:{tier:0,points:0,researchIncome:3,researching:null,turnsLeft:0,unlocked:[]},
     diplomacy:{points:20,allies:[],rivals:[],agreements:[]},
     prestige:0, projects:[],
-    actions:{category:'',actionId:'',note:'',warTarget:''},
+    actions:[{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''}],
     submitted:false,
     rel:{},
     atWar:[],
@@ -1262,6 +1262,7 @@ function stabilityLabel(s){
 const SESSION_KEY = 'csr_session_v3'; // bumped: now includes roomCode
 let session = null; // { name, country, roomCode? }
 let _roomCode = null; // null = main game; string = room id
+let _actSlot = 0; // which action slot (0,1,2) is being edited in the UI
 
 function getSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch{ return null; } }
 function setSession(s){ localStorage.setItem(SESSION_KEY, JSON.stringify(s)); session = s; }
@@ -1404,15 +1405,14 @@ function normalizeState(s){
     if(!c.military.nukes) c.military.nukes = false;
     if(!c.stockpile)    c.stockpile    = {constructionMats:5, critMinerals:3, energy:6};
     if(!c.stockpileRate) c.stockpileRate = {constructionMats:1, critMinerals:0, energy:1};
-    // Migrate old action format to new
-    if(!c.actions) c.actions = {category:'',actionId:'',note:'',warTarget:''};
-    if(c.actions.major !== undefined && c.actions.actionId === undefined){
-      c.actions = {category:'', actionId:'', note: c.actions.major||c.actions.minor||'', warTarget:''};
+    // Migrate old single-action format to 3-slot array
+    if(!c.actions || !Array.isArray(c.actions)){
+      const old = c.actions || {};
+      const first = { category:old.category||'', actionId:old.actionId||old.major||'', note:old.note||old.minor||'', warTarget:old.warTarget||'' };
+      c.actions = [first, {category:'',actionId:'',note:'',warTarget:''}, {category:'',actionId:'',note:'',warTarget:''}];
     }
-    if(c.actions.note      === undefined) c.actions.note      = '';
-    if(c.actions.category  === undefined) c.actions.category  = '';
-    if(c.actions.actionId  === undefined) c.actions.actionId  = '';
-    if(c.actions.warTarget === undefined) c.actions.warTarget = '';
+    while(c.actions.length < 3) c.actions.push({category:'',actionId:'',note:'',warTarget:''});
+    c.actions.forEach(a=>{ if(!a.category) a.category=''; if(!a.actionId) a.actionId=''; if(!a.note) a.note=''; if(!a.warTarget) a.warTarget=''; });
     if(!c.espionage) c.espionage = {spies:0, successfulOps:0, detectedOps:0, incomingOps:[], opsThisTurn:0, gatheredIntel:[]};
     else {
       if(!c.espionage.incomingOps)   c.espionage.incomingOps   = [];
@@ -1639,18 +1639,28 @@ function renderActionPanel(id){
 
   const sp = c.stockpile || {constructionMats:0,critMinerals:0,energy:0};
   const catKeys = Object.keys(ACTION_COSTS);
-  const selCat  = c.actions.category || catKeys[0];
-  const selId   = c.actions.actionId || '';
+  const catLabels = {military:'⚔️ Military',projects:'🏗 Projects',diplomacy:'🤝 Diplo',tech:'🔬 Tech'};
+
+  // Clamp slot index
+  if(_actSlot<0||_actSlot>2) _actSlot=0;
+
+  const slotAct = c.actions[_actSlot] || {category:'',actionId:'',note:'',warTarget:''};
+  const selCat  = slotAct.category || catKeys[0];
+  const selId   = slotAct.actionId || '';
   const selAct  = ACTION_COSTS[selCat]?.find(a=>a.id===selId) || null;
-  const projPool = c.economy.pool + c.economy.netIncome;
 
-  const canAfford = a => a && c.economy.pool>=a.eco && (sp.constructionMats||0)>=a.mat && (sp.critMinerals||0)>=a.min && (sp.energy||0)>=a.egy;
+  const canAfford = (a, extraEco, extraMat, extraMin, extraEgy) =>
+    a && (c.economy.pool-extraEco)>=a.eco && ((sp.constructionMats||0)-extraMat)>=(a.mat||0) &&
+    ((sp.critMinerals||0)-extraMin)>=(a.min||0) && ((sp.energy||0)-extraEgy)>=(a.egy||0);
 
-  const catLabels = {military:'⚔️ Military',projects:'🏗 Projects',diplomacy:'🤝 Diplomacy',tech:'🔬 Tech'};
+  // Calculate cost of OTHER slots to check affordability
+  let usedEco=0, usedMat=0, usedMin=0, usedEgy=0;
+  c.actions.forEach((act,i)=>{ if(i===_actSlot||!act.actionId) return; const a=(ACTION_COSTS[act.category]||[]).find(x=>x.id===act.actionId); if(a){usedEco+=a.eco||0;usedMat+=a.mat||0;usedMin+=a.min||0;usedEgy+=a.egy||0;} });
+
   const catBtns = catKeys.map(k=>`<button class="act-cat-btn${k===selCat?' active':''}" onclick="setActionCat('${id}','${k}')">${catLabels[k]||k}</button>`).join('');
 
   const actionOpts = (ACTION_COSTS[selCat]||[]).map(a=>{
-    const af = canAfford(a);
+    const af = canAfford(a, usedEco, usedMat, usedMin, usedEgy);
     const costStr = `${a.eco}💰${a.mat?` ${a.mat}🧱`:''}${a.min?` ${a.min}💎`:''}${a.egy?` ${a.egy}⚡`:''}`;
     return `<option value="${a.id}" ${a.id===selId?'selected':''} ${af?'':'style="color:var(--red)"'}>${a.name} [${a.type}] — ${costStr}</option>`;
   }).join('');
@@ -1662,37 +1672,52 @@ function renderActionPanel(id){
     'Brief description of local/regional action…';
 
   const alreadyResearching = selCat==='tech' && c.tech.researching;
-  const costPanel = selAct ? `<div style="background:var(--surface);border:1px solid ${(canAfford(selAct)&&!alreadyResearching)?'var(--border2)':'var(--red)'};border-radius:var(--radius);padding:6px 8px;margin:5px 0;font-size:11px">
+  const otherTech = c.actions.some((act,i)=>i!==_actSlot && act.category==='tech' && act.actionId);
+  const costPanel = selAct ? `<div style="background:var(--surface);border:1px solid ${(canAfford(selAct,usedEco,usedMat,usedMin,usedEgy)&&!alreadyResearching&&!otherTech)?'var(--border2)':'var(--red)'};border-radius:var(--radius);padding:6px 8px;margin:5px 0;font-size:11px">
     <div style="font-weight:700;margin-bottom:2px">${selAct.name} <span style="font-size:9px;color:var(--text-dim)">[${selAct.type} · ${selAct.scope}]</span></div>
     <div style="color:var(--text-dim);font-size:10px;margin-bottom:4px">${selAct.desc}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px">
-      ${selAct.eco?`<span style="color:${c.economy.pool>=selAct.eco?'var(--green)':'var(--red)'}">💰 ${selAct.eco} eco</span>`:''}
-      ${selAct.mat?`<span style="color:${(sp.constructionMats||0)>=selAct.mat?'var(--text-dim)':'var(--red)'}">🧱 ${selAct.mat} mats</span>`:''}
-      ${selAct.min?`<span style="color:${(sp.critMinerals||0)>=selAct.min?'var(--text-dim)':'var(--red)'}">💎 ${selAct.min} minerals</span>`:''}
-      ${selAct.egy?`<span style="color:${(sp.energy||0)>=selAct.egy?'var(--text-dim)':'var(--red)'}">⚡ ${selAct.egy} energy</span>`:''}
+      ${selAct.eco?`<span style="color:${(c.economy.pool-usedEco)>=selAct.eco?'var(--green)':'var(--red)'}">💰 ${selAct.eco} eco</span>`:''}
+      ${selAct.mat?`<span style="color:${((sp.constructionMats||0)-usedMat)>=(selAct.mat||0)?'var(--text-dim)':'var(--red)'}">🧱 ${selAct.mat} mats</span>`:''}
+      ${selAct.min?`<span style="color:${((sp.critMinerals||0)-usedMin)>=(selAct.min||0)?'var(--text-dim)':'var(--red)'}">💎 ${selAct.min} minerals</span>`:''}
+      ${selAct.egy?`<span style="color:${((sp.energy||0)-usedEgy)>=(selAct.egy||0)?'var(--text-dim)':'var(--red)'}">⚡ ${selAct.egy} energy</span>`:''}
     </div>
     ${selAct.turns > 1
       ? `<div style="color:var(--accent);font-size:10px;margin-top:4px">⏱ Completes in <strong>${selAct.turns} turns</strong> — effects apply on completion</div>`
       : `<div style="color:var(--green);font-size:10px;margin-top:4px">⚡ Takes effect immediately this turn</div>`}
-    ${alreadyResearching ? `<div style="color:var(--red);font-size:10px;margin-top:2px">🚫 Already researching: <em>${c.tech.researching}</em> (${c.tech.turnsLeft}t left) — finish before starting new research</div>` : ''}
-    ${!canAfford(selAct)?'<div style="color:var(--red);font-size:10px;margin-top:3px">⚠ Insufficient resources for this action</div>':''}
+    ${alreadyResearching ? `<div style="color:var(--red);font-size:10px;margin-top:2px">🚫 Already researching: <em>${c.tech.researching}</em> (${c.tech.turnsLeft}t left)</div>` : ''}
+    ${otherTech ? `<div style="color:var(--red);font-size:10px;margin-top:2px">🚫 Already queued tech research in another slot</div>` : ''}
+    ${!canAfford(selAct,usedEco,usedMat,usedMin,usedEgy)?'<div style="color:var(--red);font-size:10px;margin-top:3px">⚠ Insufficient resources</div>':''}
   </div>` : '';
 
-  // Target selector: always for diplomacy; for military only deployment actions (not pure procurement like nukes/bombers)
+  // Target selector: player countries + NPC countries
   const MILITARY_DEPLOY_IDS = new Set(['mech_div','naval_fleet','air_wing']);
   const showTarget = selCat==='diplomacy' || (selCat==='military' && MILITARY_DEPLOY_IDS.has(selId));
+  const npcKeys = Object.keys(PLAYABLE_COUNTRIES).filter(k=>!GS.countries[k]&&k!==id);
   const targetSel = showTarget ? `<div style="margin-bottom:5px">
-    <label style="font-size:10px;color:var(--text-dim);display:block;margin-bottom:2px;text-transform:uppercase">Target country/player</label>
-    <select id="act-target" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);padding:5px 7px;font-size:11px">
-      <option value="">None / NPC</option>
-      ${Object.keys(GS.countries).filter(k=>k!==id).map(k=>`<option value="${k}" ${c.actions.warTarget===k?'selected':''}>${PLAYER_META[k]?.flag||''} ${k}</option>`).join('')}
+    <label style="font-size:10px;color:var(--text-dim);display:block;margin-bottom:2px;text-transform:uppercase">Target country</label>
+    <select id="act-target-${_actSlot}" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);padding:5px 7px;font-size:11px">
+      <option value="">None</option>
+      <optgroup label="── Player Countries ──">
+        ${Object.keys(GS.countries).filter(k=>k!==id).map(k=>`<option value="${k}" ${slotAct.warTarget===k?'selected':''}>${PLAYER_META[k]?.flag||PLAYABLE_COUNTRIES[k]?.flag||''} ${k}</option>`).join('')}
+      </optgroup>
+      <optgroup label="── NPC Countries ──">
+        ${npcKeys.map(k=>`<option value="${k}" ${slotAct.warTarget===k?'selected':''}>${PLAYABLE_COUNTRIES[k]?.flag||''} ${k} (NPC)</option>`).join('')}
+      </optgroup>
     </select>
   </div>` : '';
 
+  // Slot indicator tabs
+  const slotDots = [0,1,2].map(i=>{
+    const act = c.actions[i];
+    const filled = act && act.actionId;
+    return `<button onclick="saveActSlot('${id}');_actSlot=${i};renderActionPanel('${id}')" style="flex:1;padding:5px 2px;font-size:10px;font-weight:700;border:none;border-radius:var(--radius);cursor:pointer;background:${i===_actSlot?'var(--accent)':'var(--surface2)'};color:${i===_actSlot?'#000':filled?'var(--green)':'var(--text-dim)'}">
+      ${i+1}${filled?'●':'○'}</button>`;
+  }).join('');
+
   el.innerHTML=`<div style="padding:8px 10px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-      <span style="font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px">Turn ${(GS.turn||0)+1} Actions</span>
-      <span style="font-size:10px;color:var(--text-dim)">After: <strong style="color:${projPool>=0?'var(--green)':'var(--red)'}">${projPool} eco</strong></span>
+      <span style="font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px">Turn ${(GS.turn||0)+1} — Up to 3 Actions</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
       <span style="font-size:20px;font-weight:700;color:var(--green)">${c.economy.pool}</span><span style="font-size:10px;color:var(--text-dim)">eco</span>
@@ -1701,69 +1726,100 @@ function renderActionPanel(id){
       <span style="font-size:11px;color:${(sp.energy||0)>0?'var(--text-dim)':'var(--red)'}">⚡${sp.energy||0}</span>
       <span style="font-size:10px;color:var(--text-dim);margin-left:auto">${c.economy.netIncome>=0?'+':''}${c.economy.netIncome}/turn</span>
     </div>
+    <div style="display:flex;gap:4px;margin-bottom:8px">${slotDots}</div>
+    <div style="font-size:10px;color:var(--text-dim);margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px">Action ${_actSlot+1} ${_actSlot>0?'<span style="color:#888">(optional)</span>':''}</div>
     <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${catBtns}</div>
-    <select id="act-action-sel" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);padding:5px 7px;font-size:11px;margin-bottom:4px" onchange="setActionId('${id}',this.value)">
+    <select id="act-sel-${_actSlot}" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);padding:5px 7px;font-size:11px;margin-bottom:4px" onchange="setActionId('${id}',this.value)">
       <option value="">— Select action —</option>${actionOpts}
     </select>
+    <input type="hidden" id="act-cat-${_actSlot}" value="${selCat}">
     ${costPanel}
     ${targetSel}
     <div style="margin-bottom:5px">
       <label style="font-size:10px;color:var(--text-dim);display:block;margin-bottom:2px;text-transform:uppercase">
-        Notes / Description ${minNoteLen>0?`<span style="color:var(--orange)">(min ${minNoteLen} chars for ${selAct?.type})</span>`:''}
+        Notes ${minNoteLen>0?`<span style="color:var(--orange)">(min ${minNoteLen} chars)</span>`:''}
       </label>
-      <textarea id="act-note" rows="3" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);padding:5px 7px;font-size:11px;resize:vertical;font-family:inherit" placeholder="${notePlaceholder}">${c.actions.note||''}</textarea>
+      <textarea id="act-note-${_actSlot}" rows="3" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);padding:5px 7px;font-size:11px;resize:vertical;font-family:inherit" placeholder="${notePlaceholder}">${slotAct.note||''}</textarea>
       <div id="act-note-warn" style="font-size:10px;color:var(--orange);min-height:14px"></div>
     </div>
     <button class="btn primary submit-turn-btn" onclick="submitActions('${id}')">✓ Submit Turn</button>
   </div>`;
 
-  const noteEl = document.getElementById('act-note');
+  const noteEl = document.getElementById('act-note-'+_actSlot);
   if(noteEl && minNoteLen>0) noteEl.addEventListener('input', ()=>{
     const w = document.getElementById('act-note-warn');
     if(w) w.textContent = noteEl.value.length<minNoteLen ? `⚠ Need ${minNoteLen-noteEl.value.length} more chars for a ${selAct?.type} action` : '';
   });
 }
 
-function setActionCat(id, cat){
+// Save current slot's note + target from DOM into c.actions before switching
+function saveActSlot(id){
+  const c = GS.countries[id]; if(!c||!Array.isArray(c.actions)) return;
+  const noteEl   = document.getElementById('act-note-'   + _actSlot);
+  const targetEl = document.getElementById('act-target-' + _actSlot);
+  if(noteEl)   c.actions[_actSlot].note      = noteEl.value.trim();
+  if(targetEl) c.actions[_actSlot].warTarget = targetEl.value;
+}
+
+function setActionCat(id, cat, slot){
   const c = GS.countries[id]; if(!c) return;
-  c.actions.category = cat; c.actions.actionId = '';
+  if(slot !== undefined) _actSlot = slot;
+  c.actions[_actSlot].category = cat; c.actions[_actSlot].actionId = '';
   renderActionPanel(id);
 }
 function setActionId(id, actionId){
   const c = GS.countries[id]; if(!c) return;
-  c.actions.actionId = actionId;
+  c.actions[_actSlot].actionId = actionId;
   renderActionPanel(id);
 }
 
 function submitActions(id){
   if(session.country !== id){ toast('You can only submit your own actions','error'); return; }
   const c = GS.countries[id];
-  const actionId = document.getElementById('act-action-sel')?.value || '';
-  const note     = document.getElementById('act-note')?.value.trim() || '';
-  const target   = document.getElementById('act-target')?.value || '';
-  const selAct   = actionId ? (ACTION_COSTS[c.actions.category||'']||[]).find(a=>a.id===actionId) : null;
+  if(!c.stockpile) c.stockpile = {constructionMats:0,critMinerals:0,energy:0};
+  const sp = c.stockpile;
 
-  if(!actionId){ toast('Select an action first','error'); return; }
-  const minNote = !selAct ? 0 : selAct.type==='Mega' ? 40 : selAct.type==='Major' ? 20 : 0;
-  if(note.length < minNote){ toast(`${selAct.type} actions need ${minNote} chars in notes (too vague — be specific!)`, 'error'); return; }
-  // Block starting new tech research if one is already in progress
-  if(c.actions.category==='tech' && c.tech.researching){ toast(`Already researching: ${c.tech.researching} (${c.tech.turnsLeft}t left). Wait for it to complete.`, 'error'); return; }
+  // Persist current slot's DOM state before reading all slots
+  saveActSlot(id);
 
-  if(selAct){
-    if(!c.stockpile) c.stockpile = {constructionMats:0,critMinerals:0,energy:0};
-    const sp = c.stockpile;
-    if(c.economy.pool < selAct.eco){ toast('Not enough economy points','error'); return; }
-    if((sp.constructionMats||0) < selAct.mat){ toast('Not enough Construction Materials 🧱','error'); return; }
-    if((sp.critMinerals||0) < selAct.min){ toast('Not enough Critical Minerals 💎','error'); return; }
-    if((sp.energy||0) < selAct.egy){ toast('Not enough Energy ⚡','error'); return; }
-    // Deduct costs immediately and sync to Firebase so AI GM sees post-deduction values
-    c.economy.pool       -= selAct.eco;
-    sp.constructionMats  -= selAct.mat;
-    sp.critMinerals      -= selAct.min;
-    sp.energy            -= selAct.egy;
+  // Read all 3 slots — current slot from DOM, others from c.actions (already persisted on slot switch)
+  const newActions = [0,1,2].map(i=>{
+    const fromDom = i === _actSlot;
+    return {
+      category:  fromDom ? (document.getElementById('act-cat-'+i)?.value || '') : (c.actions[i].category || ''),
+      actionId:  fromDom ? (document.getElementById('act-sel-'+i)?.value || '') : (c.actions[i].actionId || ''),
+      note:      fromDom ? ((document.getElementById('act-note-'+i)?.value||'').trim()) : (c.actions[i].note || ''),
+      warTarget: fromDom ? (document.getElementById('act-target-'+i)?.value || '') : (c.actions[i].warTarget || '')
+    };
+  });
+
+  // Validate and compute cumulative cost
+  let totalEco=0, totalMat=0, totalMin=0, totalEgy=0;
+  let hasTech=false;
+  for(let i=0;i<3;i++){
+    const act=newActions[i];
+    if(!act.actionId) continue; // empty slot is ok
+    const selAct=(ACTION_COSTS[act.category]||[]).find(a=>a.id===act.actionId);
+    if(!selAct){ toast(`Action ${i+1}: unknown action`,'error'); return; }
+    const minNote = selAct.type==='Mega'?40:selAct.type==='Major'?20:0;
+    if(act.note.length<minNote){ toast(`Action ${i+1}: ${selAct.type} actions need ${minNote} chars in notes`,'error'); return; }
+    if(act.category==='tech'){
+      if(hasTech){ toast('Only one Tech Research action per turn','error'); return; }
+      if(c.tech.researching){ toast(`Already researching: ${c.tech.researching} (${c.tech.turnsLeft}t left)`,'error'); return; }
+      hasTech=true;
+    }
+    totalEco+=selAct.eco||0; totalMat+=selAct.mat||0; totalMin+=selAct.min||0; totalEgy+=selAct.egy||0;
   }
-  c.actions = { category: c.actions.category||'', actionId, note, warTarget: target };
-  c.submitted = true;
+  if(newActions.every(a=>!a.actionId)){ toast('Select at least 1 action','error'); return; }
+  if(c.economy.pool<totalEco){ toast('Not enough economy points for all actions','error'); return; }
+  if(sp.constructionMats<totalMat){ toast('Not enough Construction Materials 🧱','error'); return; }
+  if(sp.critMinerals<totalMin){ toast('Not enough Critical Minerals 💎','error'); return; }
+  if(sp.energy<totalEgy){ toast('Not enough Energy ⚡','error'); return; }
+
+  // Deduct costs
+  c.economy.pool-=totalEco; sp.constructionMats-=totalMat; sp.critMinerals-=totalMin; sp.energy-=totalEgy;
+  c.actions=newActions;
+  c.submitted=true;
   pushCountryActions(id);
   renderActionPanel(id);
   renderBottomBar();
@@ -2031,7 +2087,7 @@ function advanceTurn(){
   const playerCount = Object.keys(GS.slots||{}).length;
   if(playerCount < 1){ toast('At least 1 player must join before starting a turn.','error'); return; }
   GS.phase='collecting';
-  Object.values(GS.countries).forEach(c=>{ c.submitted=false; c.actions={category:'',actionId:'',note:'',warTarget:''}; });
+  Object.values(GS.countries).forEach(c=>{ c.submitted=false; c.actions=[{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''}]; });
   pushState(); toast('Collecting actions for Turn '+(GS.turn+1));
 }
 
@@ -2075,11 +2131,8 @@ function generateOfflineAIAction(id, c){
     chosen = safeMilitary[0];
     chosenCat = 'military';
   }
-  if(chosen){
-    c.actions = { category:chosenCat, actionId:chosen.id, note:'Steady state — player offline.', warTarget:'' };
-  } else {
-    c.actions = { category:'', actionId:'', note:'', warTarget:'' };
-  }
+  if(chosen){ c.actions = [{ category:chosenCat, actionId:chosen.id, note:'Steady state — player offline.', warTarget:'' },{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''}]; }
+  else { c.actions = [{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''}]; }
   c.submitted = true;
 }
 
@@ -2104,9 +2157,9 @@ function processTurn(){
     if(GS.slots[id]?.offlineAI && !c.submitted) generateOfflineAIAction(id, c);
   });
   Object.entries(GS.countries).forEach(([id,c])=>{
-    entry.actions[id]={...c.actions};
+    entry.actions[id]=c.actions.map(a=>({...a}));
     // Apply action effects
-    applyActionEffects(c, c.actions.actionId, c.actions.category);
+    c.actions.forEach(act=>{ if(act&&act.actionId) applyActionEffects(c, act.actionId, act.category); });
     // Replenish stockpiles
     if(c.stockpile && c.stockpileRate){
       c.stockpile.constructionMats = Math.min(30, (c.stockpile.constructionMats||0) + c.stockpileRate.constructionMats);
@@ -2132,9 +2185,9 @@ function processTurn(){
       GS.newsBoard.unshift({id:Date.now().toString(36),turn:GS.turn,type:'event',category:'politics',title:`🏗 ${id}: Project Complete`,body:`${id} has completed: ${p.name}. Effects are now taking hold across the nation.`});
     });
     c.projects = c.projects.filter(p=>p.turnsLeft>0);
-    registerDiplomacyAction(id, c);  // bilateral agreement registration
+    c.actions.forEach(act=>{ if(act&&act.actionId) registerDiplomacyAction(id, c, act); });  // bilateral agreement registration
     c.submitted = false;
-    c.actions = {category:'',actionId:'',note:'',warTarget:''};
+    c.actions = [{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''}];
   });
   processMarketTurn();
   processPopulationGrowth();
@@ -2309,11 +2362,12 @@ function generateTurnChronicle(turn){
 
   // Notable diplomatic actions
   if(logEntry){
-    const allies=Object.entries(logEntry.actions).filter(([,a])=>a.actionId==='alliance'&&a.note).map(([id])=>id);
+    const allActs=[]; Object.entries(logEntry.actions||{}).forEach(([lid,acts])=>(Array.isArray(acts)?acts:[acts]).forEach(a=>a&&a.actionId&&allActs.push({id:lid,...a})));
+    const allies=[...new Set(allActs.filter(a=>a.actionId==='alliance'&&a.note).map(a=>a.id))];
     if(allies.length) parts.push(`${allies.slice(0,2).join(' and ')} ${allies.length===1?'is':'are'} forging new alliances.`);
-    const militarists=Object.entries(logEntry.actions).filter(([,a])=>['mech_div','carrier','nuclear','bomber_wing'].includes(a.actionId)).map(([id])=>id);
+    const militarists=[...new Set(allActs.filter(a=>['mech_div','carrier','nuclear','bomber_wing'].includes(a.actionId)).map(a=>a.id))];
     if(militarists.length) parts.push(`${militarists.slice(0,2).join(' and ')} ${militarists.length===1?'is':'are'} making bold military investments.`);
-    const megaBuilders=Object.entries(logEntry.actions).filter(([,a])=>['mega_proj','major_proj'].includes(a.actionId)&&a.note).map(([id,a])=>`${id}`);
+    const megaBuilders=[...new Set(allActs.filter(a=>['mega_proj','major_proj'].includes(a.actionId)&&a.note).map(a=>a.id))];
     if(megaBuilders.length) parts.push(`${megaBuilders.slice(0,2).join(' and ')} ${megaBuilders.length===1?'is':'are'} pushing forward major development projects.`);
   }
 
@@ -2906,9 +2960,9 @@ function aiProcessTurn(){
       if(GS.slots[id]?.offlineAI && !c.submitted) generateOfflineAIAction(id, c);
     });
     Object.entries(GS.countries).forEach(([id, c]) => {
-      entry.actions[id] = Object.assign({}, c.actions);
+      entry.actions[id] = c.actions.map(a=>({...a}));
       // Apply structured action effects
-      applyActionEffects(c, c.actions.actionId, c.actions.category);
+      c.actions.forEach(act=>{ if(act&&act.actionId) applyActionEffects(c, act.actionId, act.category); });
       // Replenish stockpiles
       if(c.stockpile && c.stockpileRate){
         c.stockpile.constructionMats = Math.min(30, (c.stockpile.constructionMats||0) + c.stockpileRate.constructionMats);
@@ -2935,10 +2989,10 @@ function aiProcessTurn(){
         GS.newsBoard.unshift({id:Date.now().toString(36),turn:GS.turn,type:'event',category:'politics',title:`🏗 ${id}: Project Complete`,body:`${id} has completed: ${p.name}. Effects are now taking hold across the nation.`});
       });
       c.projects = c.projects.filter(p => p.turnsLeft > 0);
-      registerDiplomacyAction(id, c);
+      c.actions.forEach(act=>{ if(act&&act.actionId) registerDiplomacyAction(id, c, act); });
       // Reset for next turn
       c.submitted = false;
-      c.actions = {category:'',actionId:'',note:'',warTarget:''};
+      c.actions = [{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''}];
     });
     processMarketTurn();
     processPopulationGrowth();
@@ -4159,50 +4213,56 @@ function processPopulationGrowth(){
 //  DIPLOMACY — BILATERAL REGISTRATION + SANCTIONS EFFECTS
 // ══════════════════════════════════════════════════════════════
 // Called in each processing loop BEFORE c.actions is cleared.
-function registerDiplomacyAction(id, c){
-  if(c.actions.category !== 'diplomacy') return;
-  const targetId = c.actions.warTarget;
-  const actionId = c.actions.actionId;
+function registerDiplomacyAction(id, c, act){
+  if(act.category !== 'diplomacy') return;
+  const targetId = act.warTarget;
+  const actionId = act.actionId;
   if(!targetId || !actionId) return;
-  const targetC = GS.countries[targetId];
-  if(!targetC) return;
+  const targetC = GS.countries[targetId]; // null for NPC countries
 
   if(actionId === 'trade_deal'){
-    if(!c.diplomacy.agreements.includes(targetId))      c.diplomacy.agreements.push(targetId);
-    if(!targetC.diplomacy.agreements.includes(id))      targetC.diplomacy.agreements.push(id);
-    // News
+    if(targetC){
+      if(!c.diplomacy.agreements.includes(targetId))      c.diplomacy.agreements.push(targetId);
+      if(!targetC.diplomacy.agreements.includes(id))      targetC.diplomacy.agreements.push(id);
+    }
     if(!GS.newsBoard) GS.newsBoard=[];
     GS.newsBoard.unshift({id:Date.now().toString(36),turn:GS.turn,type:'event',category:'diplomacy',
-      title:`📋 Trade Agreement: ${id} ↔ ${targetId}`,
-      body:`${id} and ${targetId} have signed a Free Trade Agreement. Both nations will enjoy a 10% discount on mutual market trades.`});
+      title:`📋 Trade Agreement: ${id} ↔ ${targetId}${!targetC?' (NPC)':''}`,
+      body:`${id} has signed a Free Trade Agreement with ${targetId}. ${targetC?'Both nations will enjoy a 10% discount on mutual market trades.':'The GM will adjudicate trade benefits with this NPC nation.'}`});
   }
   if(actionId === 'alliance'){
-    if(!c.diplomacy.allies.includes(targetId))          c.diplomacy.allies.push(targetId);
-    if(!targetC.diplomacy.allies.includes(id))          targetC.diplomacy.allies.push(id);
-    // Remove from rivals if present
-    c.diplomacy.rivals      = (c.diplomacy.rivals||[]).filter(r=>r!==targetId);
-    targetC.diplomacy.rivals = (targetC.diplomacy.rivals||[]).filter(r=>r!==id);
+    if(!c.diplomacy.allies.includes(targetId)) c.diplomacy.allies.push(targetId);
+    if(targetC && !targetC.diplomacy.allies.includes(id)) targetC.diplomacy.allies.push(id);
+    c.diplomacy.rivals = (c.diplomacy.rivals||[]).filter(r=>r!==targetId);
+    if(targetC) targetC.diplomacy.rivals = (targetC.diplomacy.rivals||[]).filter(r=>r!==id);
     if(!GS.newsBoard) GS.newsBoard=[];
     GS.newsBoard.unshift({id:Date.now().toString(36),turn:GS.turn,type:'event',category:'diplomacy',
-      title:`🤝 Alliance Formed: ${id} & ${targetId}`,
-      body:`${id} and ${targetId} have formalised a mutual alliance. Allies receive a 20% discount on bilateral market trades.`});
+      title:`🤝 Alliance Formed: ${id} & ${targetId}${!targetC?' (NPC)':''}`,
+      body:`${id} has formalised an alliance with ${targetId}. ${!targetC?'The GM will determine diplomatic benefits with this NPC nation.':'Allies receive a 20% discount on bilateral market trades.'}`});
   }
   if(actionId === 'sanctions'){
-    if(!c.sanctioning.includes(targetId))               c.sanctioning.push(targetId);
-    // Remove trade agreements between them
-    c.diplomacy.agreements      = (c.diplomacy.agreements||[]).filter(a=>a!==targetId);
-    targetC.diplomacy.agreements = (targetC.diplomacy.agreements||[]).filter(a=>a!==id);
+    if(targetC){
+      if(!c.sanctioning.includes(targetId)) c.sanctioning.push(targetId);
+      c.diplomacy.agreements      = (c.diplomacy.agreements||[]).filter(a=>a!==targetId);
+      targetC.diplomacy.agreements = (targetC.diplomacy.agreements||[]).filter(a=>a!==id);
+    }
     if(!GS.newsBoard) GS.newsBoard=[];
     GS.newsBoard.unshift({id:Date.now().toString(36),turn:GS.turn,type:'event',category:'diplomacy',
-      title:`🚫 ${id} imposes sanctions on ${targetId}`,
-      body:`${id} has imposed economic sanctions on ${targetId}. The sanctioned nation faces a 35% market surcharge on trades with the sanctioning party and loses 2 eco per turn.`});
+      title:`🚫 ${id} imposes sanctions on ${targetId}${!targetC?' (NPC)':''}`,
+      body:`${id} has imposed economic sanctions on ${targetId}. ${targetC?'The sanctioned nation faces a 35% market surcharge on trades with the sanctioning party and loses 2 eco per turn.':'The GM will adjudicate the impact on this NPC nation.'}`});
   }
   if(actionId === 'embargo'){
-    if(!c.embargoes.includes(targetId))                 c.embargoes.push(targetId);
+    if(targetC && !c.embargoes.includes(targetId)) c.embargoes.push(targetId);
     if(!GS.newsBoard) GS.newsBoard=[];
     GS.newsBoard.unshift({id:Date.now().toString(36),turn:GS.turn,type:'event',category:'diplomacy',
-      title:`⛔ ${id} declares embargo on ${targetId}`,
-      body:`${id} has imposed a full trade embargo on ${targetId}. No market trades are permitted between the two nations until the embargo is lifted.`});
+      title:`⛔ ${id} declares embargo on ${targetId}${!targetC?' (NPC)':''}`,
+      body:`${id} has imposed a full trade embargo on ${targetId}. ${targetC?'No market trades are permitted between the two nations until the embargo is lifted.':'The GM will adjudicate the embargo impact on this NPC nation.'}`});
+  }
+  if(actionId === 'foreign_aid'){
+    if(!GS.newsBoard) GS.newsBoard=[];
+    GS.newsBoard.unshift({id:Date.now().toString(36),turn:GS.turn,type:'event',category:'diplomacy',
+      title:`💰 ${id} sends foreign aid to ${targetId}${!targetC?' (NPC)':''}`,
+      body:`${id} has provided a foreign aid package to ${targetId}. ${!targetC?'The GM will adjudicate the diplomatic benefits with this NPC nation.':'Relations between the two nations are improving.'}`});
   }
 }
 
@@ -4672,8 +4732,8 @@ function processSoloTurn(){
   GS.phase='processing';
   const entry={turn:GS.turn+1,date:getTurnDate(GS.turn+1),actions:{}};
   Object.entries(GS.countries).forEach(([id,c])=>{
-    entry.actions[id]={...c.actions};
-    applyActionEffects(c, c.actions.actionId, c.actions.category);
+    entry.actions[id]=c.actions.map(a=>({...a}));
+    c.actions.forEach(act=>{ if(act&&act.actionId) applyActionEffects(c, act.actionId, act.category); });
     if(c.stockpile&&c.stockpileRate){
       c.stockpile.constructionMats=Math.min(30,(c.stockpile.constructionMats||0)+c.stockpileRate.constructionMats);
       c.stockpile.critMinerals    =Math.min(20,(c.stockpile.critMinerals||0)+c.stockpileRate.critMinerals);
@@ -4698,9 +4758,9 @@ function processSoloTurn(){
       GS.newsBoard.unshift({id:Date.now().toString(36),turn:GS.turn,type:'event',category:'politics',title:`🏗 ${id}: Project Complete`,body:`${id} has completed: ${p.name}. Effects are now taking hold across the nation.`});
     });
     c.projects=c.projects.filter(p=>p.turnsLeft>0);
-    registerDiplomacyAction(id, c);
+    c.actions.forEach(act=>{ if(act&&act.actionId) registerDiplomacyAction(id, c, act); });
     c.submitted=false;
-    c.actions={category:'',actionId:'',note:'',warTarget:''};
+    c.actions=[{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''},{category:'',actionId:'',note:'',warTarget:''}];
   });
   processMarketTurn();
   processPopulationGrowth();
