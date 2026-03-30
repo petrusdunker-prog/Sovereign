@@ -1475,6 +1475,7 @@ function normalizeState(s){
   s.resourceDiscoveries = s.resourceDiscoveries || [];
   if(!s.market) s.market = { offers:[] };
   if(!s.market.offers) s.market.offers = [];
+  if(!s.worldMarket) s.worldMarket = {food:{price:2,trend:0},water:{price:2,trend:0},minerals:{price:4,trend:0},services:{price:5,trend:0},mfgGoods:{price:8,trend:0},military:{price:20,trend:0}};
   // Rebuild rel entries between all player countries
   const cids = Object.keys(s.countries);
   cids.forEach(id => {
@@ -2030,6 +2031,7 @@ function sl(l,v,cc=''){return `<div style="display:flex;justify-content:space-be
 function renderGmConsole(){
   if(!GS || session.country !== 'gm') return;
   const el=document.getElementById('view-gm');
+  try{
   const sub=Object.values(GS.countries).filter(c=>c.submitted).length;
   el.innerHTML=`
     <div class="gm-header">
@@ -2136,6 +2138,7 @@ function renderGmConsole(){
       }).join('')}
     </div>
   `;
+  } catch(e){ el.innerHTML=`<div style="padding:20px;color:var(--red)">⚠ GM Console error: ${e.message}<br><pre style="font-size:10px;margin-top:8px;white-space:pre-wrap">${e.stack||''}</pre></div>`; }
 }
 
 // ── Turn management (GM only) ──
@@ -4534,6 +4537,18 @@ function updateAllUI(){
   document.getElementById('dateDisplay').textContent = getTurnDate(GS.turn);
   renderMapLegend();
   renderBottomBar();
+  // Auto-advance and auto-process for GM
+  if(session.country === 'gm'){
+    const playerCount = Object.keys(GS.slots||{}).length;
+    if(GS.phase === 'setup' && playerCount > 0){
+      advanceTurn(); return;
+    }
+    if(GS.phase === 'collecting' && playerCount > 0){
+      const total = Object.keys(GS.countries).length;
+      const submitted = Object.values(GS.countries).filter(c=>c.submitted).length;
+      if(total > 0 && submitted >= total){ processTurn(); return; }
+    }
+  }
   // Always refresh GM console for GM (they need real-time action updates)
   if(session.country === 'gm') renderGmConsole();
   // Refresh active tab
