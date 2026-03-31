@@ -599,7 +599,7 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
     <button class="tab-btn gm-tab hidden" data-tab="gm">👑 GM Console</button>
     <button class="tab-btn" data-tab="events">📰 Events</button>
     <button class="tab-btn" data-tab="log">Turn Log</button>
-    <button class="tab-btn" data-tab="chat">💬 Chat</button>
+    <button class="tab-btn" data-tab="chat">💬 Chat<span id="chatBadge" style="display:none;background:var(--red);color:#fff;border-radius:20px;font-size:9px;padding:1px 5px;margin-left:4px;font-weight:700;vertical-align:middle"></span></button>
     <button class="tab-btn" data-tab="intel" id="tabIntel">🕵️ Intel</button>
     <button class="tab-btn" data-tab="press">📢 Press</button>
     <button class="tab-btn" data-tab="market">🏪 Market</button>
@@ -684,7 +684,7 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
   <div class="tab-view" id="view-chat">
     <div id="chat-messages"><div class="chat-system">No messages yet — be the first to say something!</div></div>
     <div class="chat-input-row">
-      <input id="chatMsg" placeholder="Type a message… (Enter to send)" maxlength="400"
+      <input id="chatMsg" placeholder="Type a message… or /w CountryName msg to whisper" maxlength="400"
              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}">
       <button class="chat-send-btn" onclick="sendChat()">Send</button>
     </div>
@@ -1111,32 +1111,19 @@ function renderNpcCard(iso){
   const mil = d.mil;
   // Show relations for whichever player countries are actually in the current game
   const playerOrder = Object.keys(PLAYER_META).length ? Object.keys(PLAYER_META) : ['USA','Poland','Australia','Russia','Brazil'];
+  const npcHdr=`<div class="card-header"><span class="card-flag">${d.flag}</span><div><div class="card-name">${d.name}</div><div class="card-player text-dim">Major NPC — 2025</div></div><span class="card-gov" style="background:var(--surface2);color:var(--text-dim);font-size:9px">NPC</span></div>${d.note?`<p style="font-size:10px;color:var(--text-dim);margin:6px 0 8px;padding:5px 7px;background:var(--surface2);border-radius:var(--radius);border-left:2px solid var(--accent)">${d.note}</p>`:''}`;
+  const relRows=playerOrder.map(pid=>{
+    const m=PLAYER_META[pid]; if(!m) return '';
+    const score=d.rel[pid]??0, rl=relLabel(score);
+    return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">
+      <span style="width:16px;text-align:center">${m.flag}</span><span style="flex:1">${pid}</span>
+      <div style="width:70px;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden"><div style="width:${Math.abs(score)}%;height:100%;background:${rl.color};border-radius:3px"></div></div>
+      <span style="width:50px;text-align:right;font-weight:700;color:${rl.color}">${rl.label}</span>
+    </div>`;
+  }).join('');
   document.getElementById('action-panel').innerHTML='<p class="placeholder" style="padding:16px">This is an NPC country — no actions available.</p>';
   switchPanelTab('economy');
-  document.getElementById('cc-military').innerHTML='';
-  document.getElementById('cc-diplo').innerHTML='';
-  document.getElementById('cc-economy').innerHTML=`
-    <div class="card-header">
-      <span class="card-flag">${d.flag}</span>
-      <div><div class="card-name">${d.name}</div><div class="card-player text-dim">Major NPC — 2025</div></div>
-      <span class="card-gov" style="background:var(--surface2);color:var(--text-dim);font-size:9px">NPC</span>
-    </div>
-    ${d.note?`<p style="font-size:10px;color:var(--text-dim);margin:6px 0 8px;padding:5px 7px;background:var(--surface2);border-radius:var(--radius);border-left:2px solid var(--accent)">${d.note}</p>`:''}
-
-    <div class="section-title">⚔️ Military</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:11px;margin-bottom:8px">
-      ${[['Battalions',mil.battalions],['Mech Divisions',mil.mechDivisions],
-         ['Fleets',mil.fleets],['Carrier Groups',mil.carrierGroups],
-         ['Air Wings',mil.airWings],['Bomber Wings',mil.bomberWings]].map(([l,v])=>
-        `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border)">
-          <span class="text-dim">${l}</span><span class="fw-700">${v}</span>
-        </div>`).join('')}
-    </div>
-    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-      <span class="badge" style="background:${mil.readiness==='High'?'#2dc653':mil.readiness==='Medium'?'#f4a261':'#555'};color:#fff;border:none">${mil.readiness} Readiness</span>
-      ${mil.nukes?`<span class="badge" style="background:#8b1a1a;color:#fff;border:none">☢️ Nuclear</span>`:''}
-    </div>
-
+  document.getElementById('cc-economy').innerHTML=npcHdr+`
     <div class="section-title">📦 Resources</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
       <span style="font-size:10px;color:var(--text-dim);margin-right:2px">SELLS:</span>
@@ -1145,25 +1132,20 @@ function renderNpcCard(iso){
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
       <span style="font-size:10px;color:var(--text-dim);margin-right:2px">BUYS:</span>
       ${d.buys.map(r=>`<span class="badge" style="color:var(--gold);border-color:var(--gold)">${r}</span>`).join('')}
+    </div>`;
+  document.getElementById('cc-military').innerHTML=npcHdr+`
+    <div class="section-title">⚔️ Military Strength</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:11px;margin-bottom:8px">
+      ${[['Battalions',mil.battalions],['Mech Divisions',mil.mechDivisions],['Fleets',mil.fleets],['Carrier Groups',mil.carrierGroups],['Air Wings',mil.airWings],['Bomber Wings',mil.bomberWings]].map(([l,v])=>
+        `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border)"><span class="text-dim">${l}</span><span style="font-weight:700">${v}</span></div>`).join('')}
     </div>
-
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <span class="badge" style="background:${mil.readiness==='High'?'#2dc653':mil.readiness==='Medium'?'#f4a261':'#555'};color:#fff;border:none">${mil.readiness} Readiness</span>
+      ${mil.nukes?`<span class="badge" style="background:#8b1a1a;color:#fff;border:none">☢️ Nuclear Armed</span>`:''}
+    </div>`;
+  document.getElementById('cc-diplo').innerHTML=npcHdr+`
     <div class="section-title">🤝 Relations with Players</div>
-    <div style="display:flex;flex-direction:column;gap:3px;font-size:11px">
-      ${playerOrder.map(pid=>{
-        const m=PLAYER_META[pid]; if(!m) return '';
-        const score=d.rel[pid]??0, rl=relLabel(score);
-        const barW=Math.abs(score); const barCol=rl.color;
-        return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border)">
-          <span style="width:16px;text-align:center">${m.flag}</span>
-          <span style="flex:1;color:var(--text)">${pid}</span>
-          <div style="width:80px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
-            <div style="width:${barW}%;height:100%;background:${barCol};border-radius:3px;${score<0?'margin-left:auto':''}"></div>
-          </div>
-          <span style="width:52px;text-align:right;font-weight:700;color:${barCol}">${rl.label}</span>
-        </div>`;
-      }).join('')}
-    </div>
-  `;
+    <div style="display:flex;flex-direction:column;gap:2px">${relRows||'<span class="text-dim" style="font-size:11px">No players in game yet</span>'}</div>`;
 }
 
 function renderPlayableNpcCard(name, pc){
@@ -1628,6 +1610,7 @@ function renderCountryCard(id){
     ${mr('Air / Bombers',mil.airWings+' / '+mil.bomberWings)}
     <div class="mil-row"><span class="mil-label">Readiness</span><span style="color:${READINESS_COLOR[mil.readiness]}">${mil.readiness}</span></div>
     <div class="mil-row"><span class="mil-label">Upkeep/turn</span><span class="text-red">${upkeep}</span></div>
+    <div style="font-size:10px;color:var(--text-dim);padding:5px 7px;background:var(--surface2);border-radius:var(--radius);margin:4px 0;border-left:2px solid var(--orange)">ℹ️ <strong>Military upkeep</strong> is already factored into your net income. Each battalion costs 1 eco/turn, mech divisions 2, fleets 2, carriers 5, air wings 1, bombers 4. If you build more units the GM will adjust your net income accordingly.</div>
     ${(c.atWar&&c.atWar.length)?`<div class="section-title" style="color:var(--red);margin-top:10px">⚔️ At War</div>${c.atWar.map(w=>`<div class="war-pill">⚔️ At war with ${w}</div>`).join('')}`:''}
     ${isOtherPlayer?(()=>{
       const myC=GS.countries[session.country];
@@ -1667,6 +1650,17 @@ function renderCountryCard(id){
       ${!c.diplomacy.allies.length&&!c.diplomacy.rivals.length&&!c.diplomacy.agreements.length&&!(c.sanctioning?.length)&&!(c.embargoes?.length)?'<span class="text-dim" style="font-size:10px">No agreements</span>':''}
     </div>
     ${c.projects.length?`<div class="section-title" style="margin-top:10px">🏗 Projects</div>${c.projects.map(p=>`<div class="mil-row"><span>${p.name}</span><span class="text-dim">${p.turnsLeft}t</span></div>`).join('')}`:''}
+    <div class="section-title" style="margin-top:10px">🌍 Relations with All Countries</div>
+    <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">How other player countries view you</div>
+    ${Object.entries(GS.countries).filter(([k])=>k!==id).map(([oid,oc])=>{
+      const om=PLAYER_META[oid]; if(!om) return '';
+      const score=(oc.rel||{})[id]??0, rl=relLabel(score);
+      return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border);font-size:11px">
+        <span>${om.flag}</span><span style="flex:1">${oid}</span>
+        <div style="width:70px;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden"><div style="width:${Math.abs(score)}%;height:100%;background:${rl.color};border-radius:3px"></div></div>
+        <span style="width:55px;text-align:right;font-weight:700;color:${rl.color}">${rl.label}</span>
+      </div>`;
+    }).join('')||'<span class="text-dim" style="font-size:11px">No other countries in game</span>'}
   `;
 
   renderActionPanel(id);
@@ -3329,6 +3323,13 @@ function initTurnTimer(){
 function chatPath(){ return _roomCode ? 'rooms/'+_roomCode+'/chat' : 'gameState/chat'; }
 let _chatListener = null;
 let _chatInited = false;
+let _unreadChat = 0;
+function _updateChatBadge(){
+  const b=document.getElementById('chatBadge');
+  if(!b) return;
+  if(_unreadChat>0){ b.textContent=_unreadChat>99?'99+':_unreadChat; b.style.display='inline'; }
+  else b.style.display='none';
+}
 
 function initChat(){
   if(!isFirebaseConfigured()||!db) return;
@@ -3345,18 +3346,30 @@ function initChat(){
 function appendChatMsg(msg){
   const el = document.getElementById('chat-messages');
   if(!el) return;
+  // Whisper: only show to sender, recipient, or GM
+  if(msg.whisper){
+    const amSender = msg.player===session.name;
+    const amRecipient = session.country===msg.to || session.name===msg.toName;
+    const amGM = session.country==='gm';
+    if(!amSender && !amRecipient && !amGM) return;
+  }
   const isMe = msg.player===session.name;
   const time = new Date(msg.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
   const div = document.createElement('div');
   div.className='chat-msg'+(isMe?' mine':'');
+  const whisperStyle = msg.whisper ? 'border-color:#7c3aed;background:#1a0a2e;' : '';
+  const whisperLabel = msg.whisper ? `<span style="font-size:9px;color:#a78bfa;font-weight:700">🔒 Whisper → ${escHtml(msg.toName||msg.to)}</span><br>` : '';
   div.innerHTML=`<span class="chat-flag">${msg.flag||'🌍'}</span>
     <div style="max-width:100%">
       <div class="chat-sender">${escHtml(msg.player)}${msg.country&&msg.country!==msg.player?' · '+msg.country:''}</div>
-      <div class="chat-bubble">${escHtml(msg.text)}</div>
+      <div class="chat-bubble" style="${whisperStyle}">${whisperLabel}${escHtml(msg.text.replace(/^🔒 /,''))}</div>
       <div class="chat-meta">${time}</div>
     </div>`;
   el.appendChild(div);
   el.scrollTop=el.scrollHeight;
+  // Badge: increment if chat tab isn't currently active
+  const chatTabActive = document.getElementById('view-chat')?.classList.contains('active');
+  if(!chatTabActive && !msg.isMe){ _unreadChat++; _updateChatBadge(); }
 }
 
 function sendChat(){
@@ -3364,7 +3377,19 @@ function sendChat(){
   const text=input.value.trim(); if(!text) return;
   if(!isFirebaseConfigured()||!db){ toast('Chat requires Firebase','error'); return; }
   const m=PLAYER_META[session.country];
-  const msg={player:session.name, country:session.role==='spectator'?'Spectator':session.country, flag:session.role==='spectator'?'👁':(m?m.flag:'🌍'), text, ts:Date.now()};
+  const from=session.role==='spectator'?'Spectator':session.country;
+  const flag=session.role==='spectator'?'👁':(m?m.flag:'🌍');
+  // Whisper: /w CountryName message
+  const whisperMatch = text.match(/^\/w\s+(\S+)\s+(.+)/i);
+  if(whisperMatch){
+    const toName=whisperMatch[1], whisperText=whisperMatch[2];
+    const toKey=Object.keys(GS.countries||{}).find(k=>k.toLowerCase()===toName.toLowerCase());
+    if(!toKey){ toast('Country "'+toName+'" not found in game','error'); return; }
+    const msg={player:session.name,country:from,flag,text:'🔒 '+whisperText,ts:Date.now(),whisper:true,to:toKey,toName:PLAYER_META[toKey]?.player||toKey};
+    db.ref(chatPath()).push(msg);
+    input.value=''; return;
+  }
+  const msg={player:session.name, country:from, flag, text, ts:Date.now()};
   db.ref(chatPath()).push(msg);
   input.value='';
 }
@@ -4483,7 +4508,7 @@ function activateTab(tab){
   if(tab==='gm')        renderGmConsole();
   if(tab==='events')    renderEventsTab();
   if(tab==='log')       renderLog();
-  if(tab==='chat')      initChat();
+  if(tab==='chat'){ initChat(); _unreadChat=0; _updateChatBadge(); }
   if(tab==='intel')     renderIntelTab();
   if(tab==='press')     renderPressTab();
   if(tab==='market')    renderMarketTab();
