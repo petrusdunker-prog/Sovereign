@@ -2272,8 +2272,7 @@ function processTurn(){
 }
 
 function resetGame(){
-  const canReset = session.country === 'gm' || !!_roomCode;
-  if(!canReset){ toast('Only the GM can reset the game','error'); return; }
+  if(session.country !== 'gm'){ toast('Only the GM can reset the game','error'); return; }
   if(!confirm('⚠️ Reset the entire game back to Turn 0?\n\nAll turns, economy changes, and actions will be wiped. This cannot be undone.')) return;
   GS = clone(INITIAL_STATE);
   if(_roomCode) GS.phase = 'collecting';
